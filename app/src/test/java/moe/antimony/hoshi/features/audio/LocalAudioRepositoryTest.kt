@@ -70,6 +70,52 @@ class LocalAudioRepositoryTest {
     }
 
     @Test
+    fun reportsNoDatabaseThenImportedCopy() {
+        val filesDir = Files.createTempDirectory("hoshi-local-audio-state").toFile()
+        val repository = LocalAudioRepository(filesDir)
+
+        assertEquals(LocalAudioDatabaseState.None, repository.databaseState())
+
+        repository.replacePrivateDatabase(ByteArrayInputStream("copy".toByteArray()), expectedSizeBytes = 4)
+
+        assertEquals(LocalAudioDatabaseState.Imported(sizeBytes = 4), repository.databaseState())
+    }
+
+    @Test
+    fun linkedDatabaseTakesPrecedenceAndReportsUnavailableWithoutReadAccess() {
+        val filesDir = Files.createTempDirectory("hoshi-local-audio-link").toFile()
+        writeLink(filesDir, sizeBytes = 42)
+        val repository = LocalAudioRepository(filesDir)
+
+        assertEquals(LocalAudioDatabaseState.Linked(sizeBytes = 42, isAvailable = false), repository.databaseState())
+        assertEquals(emptyList<LocalAudioCandidate>(), repository.findAudioCandidates("音", "おと"))
+        assertNull(repository.loadAudio(LocalAudioFile(source = "nhk16", file = "oto.opus")))
+    }
+
+    @Test
+    fun removingLinkedDatabaseForgetsLinkAndSourceConfigOnly() {
+        val filesDir = Files.createTempDirectory("hoshi-local-audio-unlink").toFile()
+        writeLink(filesDir, sizeBytes = 42)
+        val configFile = filesDir.resolve(AudioSettings.LocalAudioSourceConfigPath)
+        configFile.writeText("""{"version":1,"sourceOrder":["nhk16"],"disabledSources":[]}""")
+        val unrelated = filesDir.resolve("Audio/keep.txt").also { it.writeText("keep") }
+        val repository = LocalAudioRepository(filesDir)
+
+        repository.deleteDatabase()
+
+        assertEquals(LocalAudioDatabaseState.None, repository.databaseState())
+        assertTrue(!filesDir.resolve(AudioSettings.LocalAudioLinkPath).exists())
+        assertTrue(!configFile.exists())
+        assertEquals("keep", unrelated.readText())
+    }
+
+    private fun writeLink(filesDir: java.io.File, sizeBytes: Long) {
+        val linkFile = filesDir.resolve(AudioSettings.LocalAudioLinkPath)
+        linkFile.parentFile?.mkdirs()
+        linkFile.writeText("""{"uri":"content://com.android.externalstorage.documents/document/primary%3AJP%2Fandroid.db","sizeBytes":$sizeBytes}""")
+    }
+
+    @Test
     fun updatingSourceOrderPreservesDisabledSources() {
         val filesDir = Files.createTempDirectory("hoshi-local-audio-source-order").toFile()
         val configFile = filesDir.resolve(AudioSettings.LocalAudioSourceConfigPath)

@@ -548,8 +548,18 @@
     <string name="audio_import_failed">导入失败</string>
     <string name="audio_import_android_db_failed">无法导入 android.db。</string>
     <string name="audio_android_db_size_format">android.db（%1$s）</string>
-    <string name="audio_local_audio_hint">1. 导入会把 android.db 复制到 Hoshi 的私有存储中，因此导入前请确保有足够空间容纳额外副本。\n2. 导入完成后，可以安全删除原始外部文件以释放空间。</string>
+    <string name="audio_local_audio_hint">1. 导入会把 android.db 复制到 Hoshi 的私有存储中，因此导入前请确保有足够空间容纳额外副本。导入完成后，可以安全删除原始外部文件以释放空间。\n2. 关闭复制后，Hoshi 会直接读取所选的 android.db。请保持该文件位置不变；在 Hoshi 中移除不会删除该文件。</string>
     <string name="audio_copying_android_db">正在复制 android.db</string>
+    <string name="audio_copy_android_db_to_storage">复制 android.db 到应用存储</string>
+    <string name="audio_copy_android_db_to_storage_help">保留私有副本，而不是直接读取所选外部文件</string>
+    <string name="audio_link_android_db">选择 android.db</string>
+    <string name="audio_link_android_db_hint">直接读取所选文件，不进行复制</string>
+    <string name="audio_link_android_db_failed">无法读取 android.db。</string>
+    <string name="audio_checking_android_db">正在检查 android.db</string>
+    <string name="audio_linked_android_db_format">android.db（%1$s，已链接）</string>
+    <string name="audio_linked_android_db">android.db（已链接）</string>
+    <string name="audio_linked_android_db_unavailable">无法访问已链接的 android.db。请移除后重新选择该文件。</string>
+    <string name="audio_remove_linked_android_db" comment="Local audio action that forgets a linked android.db without deleting the file, intentionally matching the Sasayaki Remove action.">移除</string>
     <string name="audio_copied_size_format">%1$s / %2$s</string>
     <string name="audio_move_source_up">上移来源</string>
     <string name="audio_move_source_down">下移来源</string>
@@ -707,7 +717,7 @@
     <string name="sasayaki_tab_settings" comment="Sasayaki sheet tab label, intentionally matching settings page titles.">设置</string>
     <string name="sasayaki_audiobook_resource">有声书</string>
     <string name="sasayaki_audiobook_cover">有声书封面</string>
-    <string name="sasayaki_remove_audio">移除</string>
+    <string name="sasayaki_remove_audio" comment="Sasayaki audio action, intentionally matching the linked local audio Remove action.">移除</string>
     <string name="sasayaki_storage_copied">已复制到应用存储。原始有声书文件可以删除。</string>
     <string name="sasayaki_storage_linked">已链接到外部有声书文件。请保留原始文件可用。</string>
     <string name="sasayaki_storage_select_audio">选择 .mp3、.m4b、.m4a 或 .opus 有声书</string>

@@ -66,6 +66,8 @@ import moe.antimony.hoshi.features.settings.GroupDivider
 import moe.antimony.hoshi.features.settings.SectionTitle
 import moe.antimony.hoshi.importing.FileImportContent
 import moe.antimony.hoshi.importing.ImportFileType
+import moe.antimony.hoshi.importing.OpenDocumentContent
+import moe.antimony.hoshi.importing.UnsupportedImportFileTypeException
 import moe.antimony.hoshi.importing.localizedImportMessage
 import moe.antimony.hoshi.ui.hoshiSingleLineTextFieldLineLimits
 import moe.antimony.hoshi.ui.hoshiTextFieldCursorBrush
@@ -86,13 +88,20 @@ fun AudioSettingsView(
     val repository = appContainer.localAudioRepository
     var nameInput by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("") }
-    var importedSize by remember { mutableStateOf(repository.databaseSizeBytes()) }
+    var databaseState by remember { mutableStateOf<LocalAudioDatabaseState?>(null) }
     var localAudioSourceState by remember { mutableStateOf(LocalAudioSourceUiState()) }
     var importProgress by remember { mutableStateOf<LocalAudioImportProgress?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
     var isImporting by remember { mutableStateOf(false) }
-    val hasImportedDatabase = importedSize != null
+    var isLinking by remember { mutableStateOf(false) }
+    val hasImportedDatabase = databaseState.let { it != null && it != LocalAudioDatabaseState.None }
+    val isBusy = isImporting || isLinking
     val importFailedMessage = stringResource(R.string.audio_import_android_db_failed)
+    val linkFailedMessage = stringResource(R.string.audio_link_android_db_failed)
+
+    LaunchedEffect(repository) {
+        databaseState = withContext(Dispatchers.IO) { repository.databaseState() }
+    }
 
     fun save(next: AudioSettings) {
         scope.launch {
@@ -135,8 +144,8 @@ fun AudioSettingsView(
         }
     }
 
-    LaunchedEffect(hasImportedDatabase, isImporting) {
-        val config = if (hasImportedDatabase && !isImporting) {
+    LaunchedEffect(hasImportedDatabase, isBusy) {
+        val config = if (hasImportedDatabase && !isBusy) {
             withContext(Dispatchers.IO) { repository.ensureSourceConfig() }
         } else {
             null
@@ -146,7 +155,7 @@ fun AudioSettingsView(
 
     val importer = rememberLauncherForActivityResult(FileImportContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        if (isImporting || hasImportedDatabase) return@rememberLauncherForActivityResult
+        if (isBusy || hasImportedDatabase) return@rememberLauncherForActivityResult
         isImporting = true
         importError = null
         importProgress = LocalAudioImportProgress(copiedBytes = 0, totalBytes = null)
@@ -164,7 +173,7 @@ fun AudioSettingsView(
                     }
                 }
             }.onSuccess { size ->
-                importedSize = size
+                databaseState = LocalAudioDatabaseState.Imported(size)
                 localAudioSourceState = LocalAudioSourceUiState(
                     config = withContext(Dispatchers.IO) { repository.ensureSourceConfig() },
                 )
@@ -176,8 +185,32 @@ fun AudioSettingsView(
         }
     }
 
+    val linker = rememberLauncherForActivityResult(OpenDocumentContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (isBusy || hasImportedDatabase) return@rememberLauncherForActivityResult
+        isLinking = true
+        importError = null
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { repository.linkDatabase(uri) }
+            }.onSuccess { size ->
+                databaseState = LocalAudioDatabaseState.Linked(sizeBytes = size, isAvailable = true)
+                localAudioSourceState = LocalAudioSourceUiState(
+                    config = withContext(Dispatchers.IO) { repository.ensureSourceConfig() },
+                )
+            }.onFailure { error ->
+                importError = if (error is UnsupportedImportFileTypeException) {
+                    error.localizedImportMessage(context, linkFailedMessage)
+                } else {
+                    linkFailedMessage
+                }
+            }
+            isLinking = false
+        }
+    }
+
     BackHandler {
-        if (!isImporting) {
+        if (!isBusy) {
             onClose()
         }
     }
@@ -194,7 +227,7 @@ fun AudioSettingsView(
                 title = { Text(stringResource(R.string.advanced_audio), fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     BackIconButton {
-                        if (!isImporting) {
+                        if (!isBusy) {
                             onClose()
                         }
                     }
@@ -331,23 +364,59 @@ fun AudioSettingsView(
                         )
                         if (loadedSettings.enableLocalAudio) {
                             GroupDivider()
-                            if (!hasImportedDatabase) {
+                            if (databaseState == LocalAudioDatabaseState.None) {
+                                val copyToStorage = loadedSettings.copyLocalAudioToPrivateStorage
                                 ListItem(
                                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                                    headlineContent = { Text(stringResource(R.string.audio_import_android_db)) },
+                                    headlineContent = { Text(stringResource(R.string.audio_copy_android_db_to_storage)) },
                                     supportingContent = {
-                                        Text(stringResource(R.string.audio_import_android_db_hint))
+                                        Text(stringResource(R.string.audio_copy_android_db_to_storage_help))
+                                    },
+                                    trailingContent = {
+                                        Switch(
+                                            checked = copyToStorage,
+                                            enabled = !isBusy,
+                                            onCheckedChange = { save(loadedSettings.copy(copyLocalAudioToPrivateStorage = it)) },
+                                        )
+                                    },
+                                )
+                                GroupDivider()
+                                ListItem(
+                                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                    headlineContent = {
+                                        Text(
+                                            stringResource(
+                                                if (copyToStorage) R.string.audio_import_android_db else R.string.audio_link_android_db,
+                                            ),
+                                        )
+                                    },
+                                    supportingContent = {
+                                        Text(
+                                            stringResource(
+                                                if (copyToStorage) {
+                                                    R.string.audio_import_android_db_hint
+                                                } else {
+                                                    R.string.audio_link_android_db_hint
+                                                },
+                                            ),
+                                        )
                                     },
                                     trailingContent = {
                                         Button(
-                                            enabled = !isImporting,
-                                            onClick = { importer.launch(ImportFileType.LocalAudioDatabase.mimeTypes) },
+                                            enabled = !isBusy,
+                                            onClick = {
+                                                if (copyToStorage) {
+                                                    importer.launch(ImportFileType.LocalAudioDatabase.mimeTypes)
+                                                } else {
+                                                    linker.launch(ImportFileType.LocalAudioDatabase.mimeTypes)
+                                                }
+                                            },
                                         ) {
                                             Text(
-                                                if (isImporting) {
-                                                    stringResource(R.string.reader_appearance_importing)
-                                                } else {
-                                                    stringResource(R.string.action_import)
+                                                when {
+                                                    isImporting -> stringResource(R.string.reader_appearance_importing)
+                                                    copyToStorage -> stringResource(R.string.action_import)
+                                                    else -> stringResource(R.string.action_choose)
                                                 },
                                             )
                                         }
@@ -362,25 +431,57 @@ fun AudioSettingsView(
                                     )
                                 }
                             }
-                            importedSize?.let { size ->
+                            val currentDatabase = databaseState
+                            if (currentDatabase is LocalAudioDatabaseState.Imported ||
+                                currentDatabase is LocalAudioDatabaseState.Linked
+                            ) {
+                                val linked = currentDatabase as? LocalAudioDatabaseState.Linked
+                                val sizeBytes = when (currentDatabase) {
+                                    is LocalAudioDatabaseState.Imported -> currentDatabase.sizeBytes
+                                    is LocalAudioDatabaseState.Linked -> currentDatabase.sizeBytes
+                                }
+                                val sizeLabel = sizeBytes?.let { Formatter.formatFileSize(context, it) }
                                 GroupDivider()
                                 ListItem(
                                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                     headlineContent = {
-                                        Text(stringResource(R.string.audio_android_db_size_format, Formatter.formatFileSize(context, size)))
+                                        Text(
+                                            when {
+                                                linked != null && sizeLabel != null ->
+                                                    stringResource(R.string.audio_linked_android_db_format, sizeLabel)
+                                                linked != null -> stringResource(R.string.audio_linked_android_db)
+                                                else -> stringResource(R.string.audio_android_db_size_format, sizeLabel.orEmpty())
+                                            },
+                                        )
+                                    },
+                                    supportingContent = if (linked?.isAvailable == false) {
+                                        {
+                                            Text(
+                                                text = stringResource(R.string.audio_linked_android_db_unavailable),
+                                                color = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    } else {
+                                        null
                                     },
                                     trailingContent = {
                                         OutlinedButton(
-                                            enabled = !isImporting,
+                                            enabled = !isBusy,
                                             onClick = {
-                                                repository.deleteDatabase()
-                                                importedSize = null
-                                                localAudioSourceState = LocalAudioSourceUiState()
-                                                importError = null
-                                                importProgress = null
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) { repository.deleteDatabase() }
+                                                    databaseState = LocalAudioDatabaseState.None
+                                                    localAudioSourceState = LocalAudioSourceUiState()
+                                                    importError = null
+                                                    importProgress = null
+                                                }
                                             },
                                         ) {
-                                            Text(stringResource(R.string.action_delete))
+                                            Text(
+                                                stringResource(
+                                                    if (linked != null) R.string.audio_remove_linked_android_db else R.string.action_delete,
+                                                ),
+                                            )
                                         }
                                     },
                                 )
@@ -431,6 +532,11 @@ fun AudioSettingsView(
                     message = stringResource(R.string.audio_copying_android_db),
                     progress = importProgress?.takeIf { it.totalBytes != null }?.fraction,
                     supportingText = importProgress?.label(context),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (isLinking) {
+                HoshiBlockingProgressOverlay(
+                    message = stringResource(R.string.audio_checking_android_db),
                     modifier = Modifier.fillMaxSize(),
                 )
             }

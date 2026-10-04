@@ -2,16 +2,18 @@ package moe.antimony.hoshi.features.audio
 
 import android.content.ContentResolver
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.antimony.hoshi.importing.ImportFileType
 import moe.antimony.hoshi.importing.validateImportFile
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -25,14 +27,36 @@ data class LocalAudioImportProgress(
     val totalBytes: Long?,
 )
 
+sealed interface LocalAudioDatabaseState {
+    data object None : LocalAudioDatabaseState
+
+    data class Imported(val sizeBytes: Long) : LocalAudioDatabaseState
+
+    data class Linked(val sizeBytes: Long?, val isAvailable: Boolean) : LocalAudioDatabaseState
+}
+
+/** A user-selected android.db read in place through a persisted SAF read grant. */
+@Serializable
+internal data class LocalAudioLink(
+    val uri: String,
+    val sizeBytes: Long? = null,
+)
+
+class UnreadableLocalAudioDatabaseException : IOException("Selected file is not a readable local audio database.")
+
 @Singleton
 class LocalAudioRepository @Inject constructor(
     @param:FilesDir private val filesDir: File,
+    private val contentResolver: ContentResolver?,
 ) {
+    constructor(filesDir: File) : this(filesDir, null)
+
     private val privateDbFile: File
         get() = File(filesDir, AudioSettings.LocalAudioPath)
     private val sourceConfigFile: File
         get() = File(filesDir, AudioSettings.LocalAudioSourceConfigPath)
+    private val linkFile: File
+        get() = File(filesDir, AudioSettings.LocalAudioLinkPath)
     private val json = Json {
         encodeDefaults = true
         ignoreUnknownKeys = true
@@ -49,7 +73,17 @@ class LocalAudioRepository @Inject constructor(
     val dbFile: File
         get() = privateDbFile
 
+    /** Deletes the private copy, or forgets a linked file without touching the user's original. */
     fun deleteDatabase() {
+        readLink()?.let { link ->
+            closeLinkedDatabase(link.uri)
+            contentResolver?.let { resolver ->
+                runCatching {
+                    resolver.releasePersistableUriPermission(Uri.parse(link.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }
+        }
+        linkFile.delete()
         privateDbFile.delete()
         sourceConfigFile.delete()
         sourceConfigCache.clear()
@@ -58,13 +92,45 @@ class LocalAudioRepository @Inject constructor(
     fun databaseSizeBytes(): Long? =
         dbFile.takeIf { it.isFile }?.length()
 
+    /** Reads link availability through the database, so call it off the main thread. */
+    fun databaseState(): LocalAudioDatabaseState {
+        readLink()?.let { link ->
+            return LocalAudioDatabaseState.Linked(
+                sizeBytes = link.sizeBytes,
+                isAvailable = withReadOnlyDatabase { it.hasLocalAudioTables() } == true,
+            )
+        }
+        return databaseSizeBytes()?.let { LocalAudioDatabaseState.Imported(it) } ?: LocalAudioDatabaseState.None
+    }
+
     fun canOpenDatabase(): Boolean =
-        withReadOnlyDatabase { db ->
-            db.rawQuery("SELECT name FROM sqlite_master LIMIT 1", null).use { cursor ->
-                cursor.moveToFirst()
-                true
-            }
-        } == true
+        withReadOnlyDatabase { db -> db.hasLocalAudioTables() } == true
+
+    /**
+     * Links [uri] in place instead of copying it. Keeps a persisted read grant and
+     * rejects files that are not readable local audio databases.
+     */
+    fun linkDatabase(uri: Uri): Long? {
+        val resolver = checkNotNull(contentResolver) { "Linking local audio requires a ContentResolver." }
+        resolver.validateImportFile(uri, ImportFileType.LocalAudioDatabase)
+        resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val key = uri.toString()
+        try {
+            val readable = runCatching { linkedDatabase(resolver, key, reopen = true).hasLocalAudioTables() }
+                .onFailure { error -> Log.w("HoshiLocalAudio", "Unable to read linked local audio database.", error) }
+                .getOrDefault(false)
+            if (!readable) throw UnreadableLocalAudioDatabaseException()
+            val size = resolver.sizeBytes(uri)
+            writeLink(LocalAudioLink(uri = key, sizeBytes = size))
+            ensureSourceConfig(reset = true)
+            return size
+        } catch (error: Throwable) {
+            linkFile.delete()
+            closeLinkedDatabase(key)
+            runCatching { resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            throw error
+        }
+    }
 
     fun importDatabase(contentResolver: ContentResolver, uri: Uri, onProgress: (LocalAudioImportProgress) -> Unit = {}): Long {
         contentResolver.validateImportFile(uri, ImportFileType.LocalAudioDatabase)
@@ -173,91 +239,63 @@ class LocalAudioRepository @Inject constructor(
         sourceConfig: LocalAudioSourceConfig,
     ): List<LocalAudioEntry>? {
         if (sourceConfig.sourceOrder.all { it in sourceConfig.disabledSources }) return emptyList()
-        return withReadOnlyDatabase { db ->
-            val args: Array<String>
-            val selection: String
-            if (normalizedReading.isBlank()) {
-                selection = "expression = ?"
-                args = arrayOf(term)
-            } else {
-                selection = "(expression = ? OR reading = ?)"
-                args = arrayOf(term, normalizedReading)
-            }
-            val rows = mutableListOf<LocalAudioEntry>()
-            db.query(
-                "entries",
-                arrayOf("source", "expression", "reading", "file", "display"),
-                selection,
-                args,
-                null,
-                null,
-                null,
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    rows += LocalAudioEntry(
-                        source = cursor.getString(0),
-                        expression = cursor.getString(1),
-                        reading = cursor.getString(2),
-                        file = cursor.getString(3),
-                        display = cursor.getString(4).orEmpty(),
-                    )
-                }
-            }
-            rows
-        }
+        return withReadOnlyDatabase { db -> db.findEntries(term, normalizedReading) }
     }
 
     fun audioSourcesFromDatabase(): List<String> {
-        val sources = withReadOnlyDatabase { db ->
-            val rows = mutableListOf<String>()
-            db.query(
-                true,
-                "entries",
-                arrayOf("source"),
-                "lower(file) LIKE ? OR lower(file) LIKE ? OR lower(file) LIKE ?",
-                arrayOf("%.mp3", "%.opus", "%.ogg"),
-                null,
-                null,
-                null,
-                null,
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    rows += cursor.getString(0)
-                }
-            }
-            rows
-        }.orEmpty()
+        val sources = withReadOnlyDatabase { db -> db.audioSources() }.orEmpty()
         return LocalAudioSourceOrder.defaultOrder(sources)
     }
 
     fun loadAudio(file: LocalAudioFile): ByteArray? {
-        return withReadOnlyDatabase { db ->
-            db.query(
-                "android",
-                arrayOf("data"),
-                "source = ? AND file = ?",
-                arrayOf(file.source, file.file),
-                null,
-                null,
-                null,
-                "1",
-            ).use { cursor ->
-                if (!cursor.moveToFirst()) null else cursor.getBlob(0)
-            }
-        }
+        return withReadOnlyDatabase { db -> db.loadAudio(source = file.source, file = file.file) }
     }
 
-    private inline fun <T> withReadOnlyDatabase(block: (SQLiteDatabase) -> T): T? {
+    private inline fun <T> withReadOnlyDatabase(block: (LocalAudioDatabase) -> T): T? {
         return runCatching {
-            if (!dbFile.isFile) return null
-            SQLiteDatabase.openDatabase(
-                dbFile.absolutePath,
-                null,
-                SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS,
-            ).use(block)
+            val link = readLink()
+            if (link != null) {
+                val resolver = contentResolver ?: return null
+                try {
+                    block(linkedDatabase(resolver, link.uri, reopen = false))
+                } catch (_: IOException) {
+                    // Providers can invalidate long-lived descriptors; retry once with a fresh one.
+                    block(linkedDatabase(resolver, link.uri, reopen = true))
+                }
+            } else {
+                if (!privateDbFile.isFile) return null
+                PlatformLocalAudioDatabase.open(privateDbFile).use(block)
+            }
         }.onFailure { error ->
             Log.w("HoshiLocalAudio", "Unable to open local audio database.", error)
         }.getOrNull()
+    }
+
+    private fun linkedDatabase(resolver: ContentResolver, uri: String, reopen: Boolean): LinkedLocalAudioDatabase =
+        synchronized(LinkedDatabases) {
+            if (reopen) LinkedDatabases.remove(uri)?.close()
+            LinkedDatabases.getOrPut(uri) { LinkedLocalAudioDatabase.open(resolver, Uri.parse(uri)) }
+        }
+
+    private fun closeLinkedDatabase(uri: String) {
+        synchronized(LinkedDatabases) {
+            LinkedDatabases.remove(uri)?.close()
+        }
+    }
+
+    private fun readLink(): LocalAudioLink? =
+        runCatching {
+            linkFile
+                .takeIf { it.isFile }
+                ?.readText()
+                ?.let { json.decodeFromString<LocalAudioLink>(it) }
+        }.onFailure { error ->
+            Log.w("HoshiLocalAudio", "Unable to read local audio link.", error)
+        }.getOrNull()
+
+    private fun writeLink(link: LocalAudioLink) {
+        linkFile.parentFile?.mkdirs()
+        linkFile.writeText(json.encodeToString(link))
     }
 
     private fun readSourceConfig(): LocalAudioSourceConfig? =
@@ -338,7 +376,10 @@ class LocalAudioRepository @Inject constructor(
         private const val DatabaseCopyBufferSizeBytes = 1024 * 1024
         private val SourceConfigCaches = mutableMapOf<String, LocalAudioSourceConfigCache>()
 
+        // One process-wide reader per linked file, shared by every repository instance.
+        private val LinkedDatabases = mutableMapOf<String, LinkedLocalAudioDatabase>()
+
         fun fromContext(context: Context): LocalAudioRepository =
-            LocalAudioRepository(context.filesDir)
+            LocalAudioRepository(context.filesDir, context.applicationContext.contentResolver)
     }
 }

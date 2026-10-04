@@ -40,6 +40,7 @@ data class AudioSettings(
     val enableLocalAudio: Boolean = false,
     val enableAutoplay: Boolean = false,
     val playbackMode: AudioPlaybackMode = AudioPlaybackMode.Interrupt,
+    val copyLocalAudioToPrivateStorage: Boolean = true,
 ) {
     val enabledAudioSourceUrls: List<String>
         get() = audioSources.filter { it.isEnabled }.map { it.url }
@@ -70,6 +71,7 @@ data class AudioSettings(
     companion object {
         const val LocalAudioPath = "Audio/android.db"
         const val LocalAudioSourceConfigPath = "Audio/android_sources.json"
+        const val LocalAudioLinkPath = "Audio/android_link.json"
         const val LocalAudioUrl = "http://localhost:8765/localaudio/get/?term={term}&reading={reading}"
         const val InternalLocalAudioUrl = "hoshi-local-audio-source://get/?term={term}&reading={reading}"
 
@@ -213,6 +215,7 @@ class AudioSettingsRepository(
             enableLocalAudio = this[KEY_ENABLE_LOCAL_AUDIO] ?: false,
             enableAutoplay = this[KEY_AUDIO_ENABLE_AUTOPLAY] ?: false,
             playbackMode = AudioPlaybackMode.fromRawValue(this[KEY_AUDIO_PLAYBACK_MODE]),
+            copyLocalAudioToPrivateStorage = this[KEY_COPY_LOCAL_AUDIO_TO_PRIVATE_STORAGE] ?: true,
         ).normalizedAudioSettings()
     }
 
@@ -226,6 +229,7 @@ class AudioSettingsRepository(
         remove(KEY_LOCAL_AUDIO_DATABASE_URI)
         this[KEY_AUDIO_ENABLE_AUTOPLAY] = normalized.enableAutoplay
         this[KEY_AUDIO_PLAYBACK_MODE] = normalized.playbackMode.rawValue
+        this[KEY_COPY_LOCAL_AUDIO_TO_PRIVATE_STORAGE] = normalized.copyLocalAudioToPrivateStorage
     }
 
     companion object {
@@ -240,6 +244,8 @@ class AudioSettingsRepository(
         private val KEY_LOCAL_AUDIO_DATABASE_URI = stringPreferencesKey("localAudioDatabaseUri")
         private val KEY_AUDIO_ENABLE_AUTOPLAY = booleanPreferencesKey("audioEnableAutoplay")
         private val KEY_AUDIO_PLAYBACK_MODE = stringPreferencesKey("audioPlaybackMode")
+        private val KEY_COPY_LOCAL_AUDIO_TO_PRIVATE_STORAGE =
+            booleanPreferencesKey("copyLocalAudioToPrivateStorage")
     }
 }
 

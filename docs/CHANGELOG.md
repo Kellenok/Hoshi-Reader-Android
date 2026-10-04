@@ -6,6 +6,13 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ## [Unreleased]
 
+### Added
+
+- Optionally use a local audio `android.db` in place instead of copying it to app storage.
+  Turn off Copy android.db to App Storage, then choose the file; Hoshi reads it through
+  the system file picker grant without All Files Access. Removing it from Hoshi keeps
+  the original file.
+
 ## [v1.4.0] - 2026-09-24
 
 ### Added

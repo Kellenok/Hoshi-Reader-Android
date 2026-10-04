@@ -550,8 +550,18 @@
     <string name="audio_import_failed">Import failed</string>
     <string name="audio_import_android_db_failed">Unable to import android.db.</string>
     <string name="audio_android_db_size_format">android.db (%1$s)</string>
-    <string name="audio_local_audio_hint">1. Import copies android.db into Hoshi\'s private storage, so keep enough free space for one extra copy before importing.\n2. After import completes, you can safely delete the original external file to free space.</string>
+    <string name="audio_local_audio_hint">1. Import copies android.db into Hoshi\'s private storage, so keep enough free space for one extra copy before importing. After import completes, you can safely delete the original external file to free space.\n2. With copying turned off, Hoshi reads the selected android.db in place. Keep the file where it is; removing it from Hoshi does not delete the file.</string>
     <string name="audio_copying_android_db">Copying android.db</string>
+    <string name="audio_copy_android_db_to_storage">Copy android.db to App Storage</string>
+    <string name="audio_copy_android_db_to_storage_help">Keep a private copy instead of reading the selected external file</string>
+    <string name="audio_link_android_db">Select android.db</string>
+    <string name="audio_link_android_db_hint">Reads the selected file in place without copying it</string>
+    <string name="audio_link_android_db_failed">Unable to read android.db.</string>
+    <string name="audio_checking_android_db">Checking android.db</string>
+    <string name="audio_linked_android_db_format">android.db (%1$s, linked)</string>
+    <string name="audio_linked_android_db">android.db (linked)</string>
+    <string name="audio_linked_android_db_unavailable">The linked android.db is unavailable. Remove it and select the file again.</string>
+    <string name="audio_remove_linked_android_db" comment="Local audio action that forgets a linked android.db without deleting the file, intentionally matching the Sasayaki Remove action.">Remove</string>
     <string name="audio_copied_size_format">%1$s of %2$s</string>
     <string name="audio_move_source_up">Move source up</string>
     <string name="audio_move_source_down">Move source down</string>
@@ -709,7 +719,7 @@
     <string name="sasayaki_tab_settings" comment="Sasayaki sheet tab label, intentionally matching settings page titles.">Settings</string>
     <string name="sasayaki_audiobook_resource">Audiobook</string>
     <string name="sasayaki_audiobook_cover">Audiobook cover</string>
-    <string name="sasayaki_remove_audio">Remove</string>
+    <string name="sasayaki_remove_audio" comment="Sasayaki audio action, intentionally matching the linked local audio Remove action.">Remove</string>
     <string name="sasayaki_storage_copied">Copied to app storage. The original audiobook file can be deleted.</string>
     <string name="sasayaki_storage_linked">Linked to the external audiobook file. Keep the original file available.</string>
     <string name="sasayaki_storage_select_audio">Select a .mp3, .m4b, .m4a, or .opus audiobook</string>

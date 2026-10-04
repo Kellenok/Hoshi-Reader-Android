@@ -82,6 +82,17 @@ class AudioSettingsRepositoryTest {
     }
 
     @Test
+    fun localAudioCopyDefaultsToIosPrivateCopyAndPersistsLinkChoice() = runBlocking {
+        repository().use { repository ->
+            assertTrue(repository.settings.first().copyLocalAudioToPrivateStorage)
+
+            repository.update { it.copy(copyLocalAudioToPrivateStorage = false) }
+
+            assertFalse(repository.settings.first().copyLocalAudioToPrivateStorage)
+        }
+    }
+
+    @Test
     fun invalidPlaybackModeFallsBackToInterruptInDataStoreContract() {
         assertEquals(AudioPlaybackMode.Interrupt, AudioPlaybackMode.fromRawValue("unknown"))
         assertEquals(AudioPlaybackMode.Interrupt, AudioPlaybackMode.fromRawValue(null))

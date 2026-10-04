@@ -679,6 +679,14 @@ Validate relevant dictionary/audio changes with:
   recording; autoplay, redirects, Kanji lookup, Back/Forward, and new popup
   results must reset entry-scoped candidate state. Repeat in light, dark, and
   light/dark E-ink themes at popup scales 0.8, 1, and 2.
+- linked local audio: turn off Copy android.db to App Storage, choose a
+  multi-GB `android.db` from shared storage (for example `Download/` or a
+  custom folder) with no All Files Access, and confirm no copy is made, lookup
+  playback and Anki audio export work, and the link survives app restart.
+  Remove it and confirm the original file still exists. Move or delete the
+  original while linked, restart, and confirm Audio settings shows the
+  unavailable state and lookups degrade to no local audio without crashing.
+  Run `LinkedLocalAudioDatabaseDeviceTest` only on a disposable device.
 - Sasayaki MP3, M4B, and Opus imports from local or seekable SAF sources before pressing Play: confirm the total
   duration is already visible; M4B/Opus title, artist, cover, and chapters load
   together without a delayed artist row; playback preparation may subsequently

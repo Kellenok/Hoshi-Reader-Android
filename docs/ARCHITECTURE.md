@@ -383,6 +383,19 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   audio-list JSON protocol at the WebView interception boundary; all popup
   hosts share it. Candidate URLs are actual remote media URLs, so playback and
   Anki continue through their existing bridges and backends.
+- `LocalAudioRepository` serves `android.db` either from the private
+  `Audio/android.db` copy (iOS default, platform SQLite) or, when the user turns
+  off copying, from a linked SAF document recorded in `Audio/android_link.json`
+  with a persisted read grant. Both backends implement `LocalAudioDatabase`
+  with identical query semantics. Linked files open once per process through
+  `LinkedLocalAudioDatabase`: `ReadOnlySqliteFile` is a pure-Kotlin, read-only
+  SQLite file-format reader that serves pages with positional reads from the SAF
+  descriptor (never a file path or mmap), so it needs no broad storage
+  permission, native library, or copy. `LocalAudioSqliteReader` answers lookups
+  through the file's own BINARY b-tree indexes and falls back to table scans when
+  an index is missing, partial, or collated; it reads the main file only, like
+  an immutable SQLite open. A failed query reopens the descriptor once. Removing a
+  linked database releases the grant and never deletes the user's file.
 - Popup audio sources cross the iframe boundary as ordered name/URL pairs.
   `LocalAudioRepository` returns every enabled, ranked local candidate and
   `AudioRequestHandler` exposes their descriptive labels and deduplicated URLs.
